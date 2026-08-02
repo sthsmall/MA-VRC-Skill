@@ -70,6 +70,7 @@ Verify on the clone:
 - RadialPuppet controls show `param=""` and `subParams=[<name>]`;
 - the FX controller gained `MA Responsive: <name>` layers for each ObjectToggle;
 - all FX anim bindings resolve under the avatar root (root-path binding scan returns 0 broken);
+- **the default outfit container is active in the built clone, others inactive** (menu `isDefault` drives default wear, not scene state);
 - Console has no new errors/warnings vs. baseline.
 
 Destroy the clone afterwards (`Object.DestroyImmediate`). This preview does not publish.
@@ -87,6 +88,10 @@ Destroy the clone afterwards (`Object.DestroyImmediate`). This preview does not 
 - [ ] `_MA_Menu` tree with submenus (`MenuSource=Children`) and menu items.
 - [ ] `expressionsMenu` cleared; MA builds from tree.
 - [ ] ObjectToggle nodes carry MenuItem + ObjectToggle with correct `referencePath`, `Active` polarity.
+- [ ] Target nodes carry `Untagged`, not `EditorOnly` (EditorOnly nodes are stripped and get no responsive layer).
 - [ ] Old FX toggle layers deleted; slider layers kept and paths rewritten.
 - [ ] RadialPuppet parameters in `subParameters`.
+- [ ] **All outfit containers inactive in scene; default suite enabled via menu `isDefault`** (do not hard-code activeSelf in edit mode).
+- [ ] **New outfits with own armature: add OutfitRoot + MergeArmature + MeshSettings**.
+- [ ] **Per-suite menu stays under 8 controls** to avoid auto `More` overflow; part toggles flat.
 - [ ] `ProcessAvatarUI` build validated; no broken bindings; Console clean.

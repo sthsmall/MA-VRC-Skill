@@ -99,6 +99,51 @@ Destroy the clone afterwards (`Object.DestroyImmediate`). This is a preview; it 
 
 **Verify** after building: on the clone menu, RadialPuppet controls show `param=""` and `subParams=[<name>]`.
 
+## 9. EditorOnly tag silently excludes a node from ObjectToggle animation
+
+**Symptom**: A group ObjectToggle references N nodes, but the build generates only N-1 `MA Responsive` layers. One specific node is missing with no Console error.
+
+**Cause**: That node's GameObject has the `EditorOnly` tag. EditorOnly objects are stripped at build/runtime, so MA skips generating animation for them. The node still exists in edit mode, so inspector checks pass and the reference resolves — only the generated animation is missing.
+
+**Diagnosis**: Compare the `tag` of every target node; the missing one is `EditorOnly` while the others are `Untagged`.
+
+**Fix**:
+```csharp
+node.gameObject.tag = "Untagged";
+```
+
+**Verify** after fixing: rebuild and confirm the `MA Responsive: <name>` layer now exists for that node (layer count should equal node count).
+
+## 10. Outfit containers: keep inactive in scene; let MA isDefault control default
+
+**Symptom**: An outfit/container GameObject is set `activeSelf=true` in the scene, so the avatar uploads wearing it regardless of menu state, or a non-default outfit is shown on load.
+
+**Cause**: When building outfit-suite toggles (MA ObjectToggle controlling a container like `Clothes/Default`), the container's scene active state acts as the fallback. Setting it active in edit mode hard-codes "this outfit is worn" and fights the menu toggle.
+
+**Correct pattern**:
+- Keep **every outfit container inactive** in the scene (`activeSelf=false`), including the default outfit.
+- Let the **menu item's `isDefault=True`** decide which outfit is worn on load — MA builds the animation to enable it.
+- Verify on the built clone: `Clothes$Default$14 activeInHierarchy=True`, `Clothes$OtherOutfit$13 activeInHierarchy=False`.
+
+## 11. Independent-armature outfits need OutfitRoot + MergeArmature + MeshSettings
+
+**Symptom**: A newly added outfit (own armature, bones point at its own skeleton) doesn't follow the body, or MA doesn't treat it as a switchable suite.
+
+**Fix**: On the outfit root add:
+- **ModularAvatarOutfitRoot** — marks it as an independent outfit module so MA treats it as a switchable suite.
+- **ModularAvatarMergeArmature** on its armature root — `mergeTarget` = the avatar's main armature; MA matches shared bones by name (prefix/suffix auto-inferred) and keeps outfit-specific bones.
+- **ModularAvatarMeshSettings** — mesh bounds/anchor configuration.
+
+Verify `GetBonesMapping().Count > 0` after adding MergeArmature, and confirm built skeleton puts outfit bones under the avatar's main armature (`Armature/Hips/...`).
+
+## 12. Menu item count per submenu: avoid the auto "More" overflow page
+
+**Symptom**: MA adds a `More` overflow submenu automatically, splitting your controls.
+
+**Cause**: A VRChat submenu supports at most 8 controls (7 + overflow trigger). When a suite menu has many part toggles, MA auto-splits.
+
+**Prefer**: keep per-suite part toggles flat within a suite menu when under the limit; if you exceed 8 controls, deliberately organize into logical sub-groups rather than relying on the auto `More` page. Re-check the built menu for unexpected `More` entries.
+
 ## Diagnostics summary
 
 When a toggle "doesn't work", check in order:
@@ -110,3 +155,7 @@ When a toggle "doesn't work", check in order:
 5. MenuInstaller has menuToAppend or a same-GameObject MenuSource (#5).
 6. FX layer has the `MA Responsive: <name>` layer after build (#7).
 7. RadialPuppet dials have their parameter in `subParameters`, not `parameter` (#8).
+8. Target nodes do not carry the `EditorOnly` tag (see #9) — compare tag of every target against siblings that DO get a responsive layer.
+9. Outfit containers are inactive in the scene and rely on menu `isDefault` (#10).
+10. Independent-armature outfits have OutfitRoot + MergeArmature (#11).
+11. Per-suite menu stays under 8 controls to avoid auto `More` overflow (#12).
