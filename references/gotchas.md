@@ -105,7 +105,9 @@ Destroy the clone afterwards (`Object.DestroyImmediate`). This is a preview; it 
 
 **Cause**: That node's GameObject has the `EditorOnly` tag. EditorOnly objects are stripped at build/runtime, so MA skips generating animation for them. The node still exists in edit mode, so inspector checks pass and the reference resolves — only the generated animation is missing.
 
-**Diagnosis**: Compare the `tag` of every target node; the missing one is `EditorOnly` while the others are `Untagged`.
+**Bigger variant**: a **container/directory-level `EditorOnly` tag strips the ENTIRE subtree at build**. The mango.milfy 08.05 avatar had `Clothes` tagged EditorOnly → all clothing meshes vanished from the built clone (menus/params/toggles all fine, but no cloth nodes at all), while `Hair` and other dirs were Untagged and kept their meshes. **When "a whole category of nodes disappears after build", check the tag of the container/parent GameObject first.**
+
+**Diagnosis**: Compare the `tag` of every target node; the missing one is `EditorOnly` while the others are `Untagged`. For whole-subtree loss, check parent/container tags.
 
 **Fix**:
 ```csharp
@@ -144,6 +146,117 @@ Verify `GetBonesMapping().Count > 0` after adding MergeArmature, and confirm bui
 
 **Prefer**: keep per-suite part toggles flat within a suite menu when under the limit; if you exceed 8 controls, deliberately organize into logical sub-groups rather than relying on the auto `More` page. Re-check the built menu for unexpected `More` entries.
 
+## 13. `automaticValue` silently breaks suite mutual exclusion
+
+**Symptom**: Multiple suites share a `cloth`/`hair` parameter for exclusive switching, but toggling one suite doesn't turn off the others, or the built param type is `Bool` instead of `Int`.
+
+**Cause**: MA's `ParameterAssignerPass` overwrites values for MenuItems with `automaticValue=true` (the default):
+- Default value comes only from `list.FirstOrDefault(m => m.isDefault && !m.automaticValue)?.Control?.value` — an `isDefault` item **with `automaticValue=true` does NOT set the default**;
+- If an `isDefault`+`automaticValue` param has a single menu item, the implicit default is `1`; if there are **multiple** items (mutual-exclusion), the default falls back to **0** → nothing active on startup;
+- non-default item → for **Bool/Float** params forced to `1` ("just set it to 1") — no exclusion possible;
+- non-default item → for **Int** params auto-assigned an increasing value — exclusion works.
+
+So with Bool/Float params (or auto values), two suite toggles both end up `value=1` and never switch; and with a default suite left `automaticValue=true`, the built param default becomes `0` (nothing shown on startup).
+
+**Fix**: set **every** suite `all` toggle (including the default suite) to:
+```csharp
+so.FindProperty("automaticValue").boolValue = false;
+so.FindProperty("Control.value").floatValue = <distinct per suite>; // Default=1, next=2, ...
+```
+Default suite: `isDefault=true` + `automaticValue=false` + `value=1` (its value becomes the param default). Non-default suites: `isDefault=false` + `automaticValue=false` + distinct value.
+
+**Verify**: built `cloth`/`hair` param type is `Int` **and default is `1` (not 0)**; default container active, non-default containers inactive.
+
+## 14. Commercial MA modules ship complete config — don't rebuild, integrate
+
+**Symptom**: Imported assets (e.g. Nova) are full MA modules, not plain outfits. Treating them as a new suite breaks their built-in behavior or duplicates menus.
+
+**Recognition**: The module root has its own `ModularAvatarMenuInstaller` + `ModularAvatarMenuItem` (type=103, subMenu → its own VRCExpressionsMenu asset), plus its own `MergeAnimator`/`MergeArmature`/`MeshSettings`/`BlendshapeSync` and parameters (e.g. `N_Wing`). The shop pack often has a per-model prefab (`@Prefab/<Model>/@Modular/`).
+
+**Integration**:
+- Place the module under the correct category folder (`Hair/`, etc.).
+- **Keep all its MA components** — its menu auto-installs via its MenuItem (MenuItem acts as MenuSource, so its MenuInstaller is active even with menuToAppend=null).
+- In `_MA_Menu/<menu>`, create a module submenu that wraps the module's own MenuItem as a child, and add an `all` suite toggle (shared param, manual value, see #13).
+- Module containers start inactive; default via `isDefault`.
+- The module's detail toggles (wing/tail etc.) are driven by its own controller — leave them as-is.
+
+## 15. Moved commercial MA module: controller animation paths break (fix via relativePathRoot)
+
+**Symptom**: A commercial MA module's controller animations (e.g. `Nova/~Wing`) break after moving the module into a subfolder (`Hair/Nova`). Detail toggles (wings/tail) stop working.
+
+**Cause**: The module's controller paths start with the module name (`Nova/...`), assuming it sits at the avatar root. After moving, those paths resolve to nothing. MA's MergeAnimator doesn't rewrite them by default.
+
+**Fix** (don't edit commercial animation assets): set the module's **MergeAnimator `relativePathRoot`** to the module's parent, with `pathMode=Relative`:
+```csharp
+rpr.FindPropertyRelative("referencePath").stringValue = "Hair";
+rpr.FindPropertyRelative("targetObject").objectReferenceValue = hair.gameObject;
+so.FindProperty("pathMode").intValue = 0; // Relative
+```
+MA prepends the root-relative prefix, so `Nova/~Wing` → `Hair/Nova/~Wing` and resolves.
+
+**Verify**: built module animation bindings all resolve (e.g. 31/31 OK).
+
+## 16. Moved SMR node: bones still reference the old prefab Armature
+
+**Symptom**: A SkinnedMeshRenderer node (especially cloned from a prefab) no longer follows the body after being moved/reparented.
+
+**Cause**: The SMR `bones` array still references the **source prefab's Armature** (`Milfy_Another/Armature/...`, not present in scene) instead of the avatar's main Armature. Reparenting doesn't rebind them.
+
+**Diagnosis**: count how many `smr.bones` are actually under the avatar's main Armature. Broken case: `0/222` (all point to a missing prefab root).
+
+**Fix**: rebind bones by name to the main Armature, and set rootBone:
+```csharp
+var nameMap = mainArm.GetComponentsInChildren<Transform>(true).ToDictionary(t => t.name, t => t);
+foreach (ref var bone in smr.bones) if (nameMap.TryGetValue(bone.name, out var t)) bone = t;
+smr.rootBone = avatarRoot.Find("AutoAnchorObject");
+```
+
+**Note**: bone **names** matching (222/222) does not mean the Transform references are valid — always check the actual referenced objects.
+
+## 17. NDMF-plugin assets generate their own menu/params (no manual menu needed)
+
+**Symptom**: An imported asset (e.g. `nyappu.lightcontroller`) auto-generates a "Lighting Setting" submenu and `LightController/*` parameters on build, without any manual setup.
+
+**Recognition**: The asset ships an `Editor/NDMFPlugin.cs` (`ExportsPlugin`), and its component has an `installTargetMenu` field. The generator creates MA components (MergeAnimator with pathMode=Absolute + Parameters + MenuInstaller + MenuItem) at build time.
+
+**Behavior**:
+- `installTargetMenu=null` → auto-creates a submenu (e.g. "Lighting Setting") installed to the avatar menu root;
+- auto-generates params (`LightController/LightLimit` etc.);
+- auto-generates an animation controller.
+
+**Note**: don't hand-build a menu for these; just build-verify it doesn't conflict. If you need it elsewhere, set `installTargetMenu` to redirect.
+
+## 18. Standalone accessory (e.g. elf ears): use BoneProxy, not OutfitRoot
+
+**Symptom**: Adding a small independent-bone accessory (elf ears prefab with its own `Armature.E.ears`) to an avatar. Putting **ModularAvatarOutfitRoot** on it makes its parent suite container (e.g. `Hair/Default`) **inactive in the built clone** (aSelf=False) even though the `all` toggle and params are correct.
+
+**Cause**: OutfitRoot tells MA to treat the object as an independent suite, changing the Responsive-layer logic for its parent container.
+
+**Fix**: for accessories that just need to follow a body bone (no armature merging):
+- Instantiate the prefab at the avatar root (e.g. `E.ears Variant`), not inside a suite container;
+- add **ModularAvatarBoneProxy**, target = a main Armature bone (e.g. `Head`);
+- optionally add ModularAvatarMeshSettings.
+- After build, accessory bones land under the target bone (`parent=Head`) and follow the body; the SMR stays aHier=True.
+
+**Reserve OutfitRoot for true independent-armature outfits that need MergeArmature.**
+
+## 19. Multiple avatars sharing a scene / shared expression assets
+
+**Scenario**: Scene holds several avatar roots (`mango.milfy.26.08.02/05/06`) sharing the same `VRCExpressionsMenu` + `VRCExpressionParameters` asset (same instance ID).
+
+**Gotchas**:
+- **Don't hardcode the avatar root name** in automation; a version rename silently breaks `root.Find("...")`. Dynamically find the active avatar.
+- **Building an inactive avatar gives unreliable output** (SMR=0 or truncated clone). Set the target avatar active before building.
+- Shared expression assets are **instantiated per clone at build** — the original shared asset is never mutated, so "cloth/hair missing in the shared asset" is expected and fine; the build clone has them.
+
+## 20. Localizing MA menu names to Chinese
+
+**Safe to rename** (menu text only): pure MenuItems with fixed param names (`Nail`, `FHSharp`...), fixed-param sliders, `all` toggles (param=cloth/hair), fixed-param prefab toggles (`Smartphone`).
+
+**Do NOT rename**: ObjectToggle nodes with empty param (auto `__MA/AutoParam/<name>$hash` — renaming breaks the auto param), auto-param sliders, suite brand names, commercial module internals.
+
+When writing Chinese names via codedom, use `\uXXXX` escapes (direct chars become `?`). Verify actual names via base64 of the UTF-8 bytes.
+
 ## Diagnostics summary
 
 When a toggle "doesn't work", check in order:
@@ -159,3 +272,11 @@ When a toggle "doesn't work", check in order:
 9. Outfit containers are inactive in the scene and rely on menu `isDefault` (#10).
 10. Independent-armature outfits have OutfitRoot + MergeArmature (#11).
 11. Per-suite menu stays under 8 controls to avoid auto `More` overflow (#12).
+12. Suite `all` toggles on non-default suites set `automaticValue=false` + distinct value (#13).
+13. Commercial MA modules keep their own components; only wrap + add suite toggle (#14).
+14. Moved commercial modules: check controller paths; fix via MergeAnimator `relativePathRoot` (#15).
+15. Moved SMR nodes: verify bones reference the main Armature, rebind by name if not (#16).
+16. NDMF-plugin assets auto-generate menus/params; no manual menu needed (#17).
+17. Standalone accessories: BoneProxy to follow a bone; OutfitRoot on a plain accessory breaks its container's built state (#18).
+18. Scene with multiple avatars: build only active avatars, don't hardcode root names (#19).
+19. Menu localization: never rename auto-param ObjectToggle nodes or auto sliders (#20).

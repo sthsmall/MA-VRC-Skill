@@ -17,3 +17,7 @@
 - `SKILL.md` —— 主要工作流和策略
 - `references/` —— 组件指南、工作流、版本说明、安全规则、官方来源
 - `scripts/` —— 本地包检查脚本（PowerShell / Python）
+
+## 致谢
+
+本 skill 参考了 [XiaoboooOvO/VRChatEditorSkill](https://github.com/XiaoboooOvO/VRChatEditorSkill) 的设计与实现，在此表示感谢。
