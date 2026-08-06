@@ -20,4 +20,4 @@
 
 ## 致谢
 
-本 skill 参考了 [XiaoboooOvO/VRChatEditorSkill](https://github.com/XiaoboooOvO/VRChatEditorSkill) 的设计与实现，在此表示感谢。
+搭配使用 [XiaoboooOvO/VRChatEditorSkill](https://github.com/XiaoboooOvO/VRChatEditorSkill)，在此表示感谢。
