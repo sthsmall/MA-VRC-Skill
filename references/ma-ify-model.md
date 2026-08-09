@@ -41,6 +41,8 @@ This workflow is the combined experience from a full MA-ification pass on a VRCS
    - Slider/RadialPuppet → `Control.type = 203`, `Control.parameter.name = ""` (empty), `Control.subParameters[0].name = "<param>"` (see gotcha #8).
    - Int-select (Nail/FacialType) → Toggle items each carrying a distinct `Control.value`.
 3. Clear the avatar descriptor's `expressionsMenu` so MA builds the menu from scratch (otherwise the old VRCExpressionsMenu contents are appended and duplicate MA items).
+4. **Icon reuse (Milfy pattern)**: reuse the commercial menu's icon textures directly — set `PortableControl.Icon` to the original `Texture2D` loaded from the commercial menu's icon folder (e.g. `Assets/.../VRC/EXMenu/Icons/*.png`). The original icons remain untouched assets; only the MA MenuItem references them. Assign icons to top-level submenus, `all` masters, part toggles, and sliders for a native look.
+5. **System/legacy menu dedup**: if you keep the original full menu as a `MenuSource = MenuAsset` submenu (e.g. `System Menu`), it duplicates every toggle/slider you also rebuilt in MA. Fix: convert that submenu to `MenuSource = Children` and rebuild it as an MA tree, dropping items you now own (cloth/hair toggles) and keeping the rest (body sliders, Face, Facial Set, etc, KumaPhone, Nail). Verify in the build that each control exists exactly once across the whole tree.
 
 ## Phase 4 — Toggle controls via MA ObjectToggle
 
@@ -55,9 +57,10 @@ Use this for single-object on/off switches that were previously FX layers.
 
 MA has no continuous-blendshape equivalent; keep sliders in the FX layer.
 
-1. Rewrite every FX anim clip binding whose root path no longer resolves: old `path: Cardigan` → `path: Clothes/Default/Cardigan`, etc. Do this for all clips reachable from the FX controller.
-2. Keep the FX slider layers (BreastSize, Sleeve, BLength, FHLength, TWLength, TWVolume, ...).
-3. Multi-object + blendshape combos (e.g. HairNoSide toggling several objects plus blendshapes) are also just path fixes — no MA rewrite needed.
+1. Rewrite every FX anim clip binding whose root path no longer resolves: old `path: Cardigan` → `path: Clothes/Default/Cardigan`, etc. **Scan the entire `Animation/` folder, not just clips reachable from the FX controller** — AFK/pose/hand clips can also bind clothing root paths (e.g. `Milfy_AFK_*` binds `Cardigan`). Implement as: `AnimationUtility.GetCurveBindings(clip)`, read `GetEditorCurve`, delete old binding, re-add with rewritten `binding.path`, `EditorUtility.SetDirty` + `AssetDatabase.SaveAssets`.
+2. **Shared-clip warning**: those rewritten clips are commercial assets shared by sibling avatar variants (e.g. `Milfy_kisekae` prefabs use the same clips). Rewriting the path fixes the current avatar but breaks variants that still use the old top-level layout. Decide up front: rewrite in place (accepting variant breakage) or copy clips/controller first. Verify the target variant after the change.
+3. Keep the FX slider layers (BreastSize, Sleeve, BLength, FHLength, TWLength, TWVolume, ...).
+4. Multi-object + blendshape combos (e.g. HairNoSide toggling several objects plus blendshapes) are also just path fixes — no MA rewrite needed.
 
 ## Phase 6 — Validate the build
 
